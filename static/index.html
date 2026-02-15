@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Aviation Advisor</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <div class="app-shell">
+        <header class="header">
+            <div class="header-brand">
+                <div class="header-icon">&#9992;</div>
+                <h1>Aviation <span>Advisor</span></h1>
+            </div>
+            <nav class="header-nav">
+                <a href="/admin">Manage Documents</a>
+            </nav>
+        </header>
+
+        <div class="chat-area" id="chatArea">
+            <div class="welcome" id="welcome">
+                <div class="welcome-icon">&#9992;</div>
+                <h2>Private Aviation Expert</h2>
+                <p>Ask me anything about private aviation — jet cards, fractional ownership, charter options, aircraft comparisons, costs, and more.</p>
+                <div class="welcome-suggestions">
+                    <button class="suggestion-chip" onclick="askSuggestion(this)">Compare jet card programs</button>
+                    <button class="suggestion-chip" onclick="askSuggestion(this)">Charter vs. fractional ownership</button>
+                    <button class="suggestion-chip" onclick="askSuggestion(this)">Cost of flying private</button>
+                    <button class="suggestion-chip" onclick="askSuggestion(this)">Safety ratings explained</button>
+                </div>
+            </div>
+        </div>
+
+        <div class="input-area">
+            <div class="input-wrapper">
+                <textarea id="messageInput" placeholder="Ask about private aviation..." rows="1"
+                    onkeydown="handleKeydown(event)" oninput="autoResize(this)"></textarea>
+                <button class="send-btn" id="sendBtn" onclick="sendMessage()" title="Send">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                        <line x1="22" y1="2" x2="11" y2="13"></line>
+                        <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
+                    </svg>
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+    const chatArea = document.getElementById('chatArea');
+    const messageInput = document.getElementById('messageInput');
+    const sendBtn = document.getElementById('sendBtn');
+    const welcome = document.getElementById('welcome');
+
+    let conversationHistory = [];
+    let isStreaming = false;
+
+    function autoResize(el) {
+        el.style.height = 'auto';
+        el.style.height = Math.min(el.scrollHeight, 120) + 'px';
+    }
+
+    function handleKeydown(e) {
+        if (e.key === 'Enter' && !e.shiftKey) {
+            e.preventDefault();
+            sendMessage();
+        }
+    }
+
+    function askSuggestion(btn) {
+        messageInput.value = btn.textContent;
+        sendMessage();
+    }
+
+    function addMessage(role, content) {
+        if (welcome) welcome.remove();
+
+        const div = document.createElement('div');
+        div.className = `message ${role}`;
+
+        const avatar = document.createElement('div');
+        avatar.className = 'message-avatar';
+        avatar.innerHTML = role === 'user' ? '&#128100;' : '&#9992;';
+
+        const contentDiv = document.createElement('div');
+        contentDiv.className = 'message-content';
+        contentDiv.innerHTML = formatContent(content);
+
+        div.appendChild(avatar);
+        div.appendChild(contentDiv);
+        chatArea.appendChild(div);
+        chatArea.scrollTop = chatArea.scrollHeight;
+
+        return contentDiv;
+    }
+
+    function formatContent(text) {
+        // Convert markdown-like formatting to HTML
+        let html = text
+            .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+            .replace(/\*(.*?)\*/g, '<em>$1</em>')
+            .replace(/`(.*?)`/g, '<code>$1</code>');
+
+        // Handle lists
+        const lines = html.split('\n');
+        let result = [];
+        let inList = false;
+
+        for (const line of lines) {
+            const trimmed = line.trim();
+            if (trimmed.match(/^[-•]\s/)) {
+                if (!inList) { result.push('<ul>'); inList = true; }
+                result.push('<li>' + trimmed.replace(/^[-•]\s/, '') + '</li>');
+            } else if (trimmed.match(/^\d+\.\s/)) {
+                if (!inList) { result.push('<ol>'); inList = true; }
+                result.push('<li>' + trimmed.replace(/^\d+\.\s/, '') + '</li>');
+            } else {
+                if (inList) {
+                    result.push(inList ? '</ul>' : '</ol>');
+                    inList = false;
+                }
+                if (trimmed) result.push('<p>' + trimmed + '</p>');
+            }
+        }
+        if (inList) result.push('</ul>');
+
+        return result.join('');
+    }
+
+    function showTyping() {
+        if (welcome) welcome.remove();
+
+        const div = document.createElement('div');
+        div.className = 'message assistant';
+        div.id = 'typingMessage';
+
+        const avatar = document.createElement('div');
+        avatar.className = 'message-avatar';
+        avatar.innerHTML = '&#9992;';
+
+        const contentDiv = document.createElement('div');
+        contentDiv.className = 'message-content';
+        contentDiv.id = 'streamContent';
+        contentDiv.innerHTML = '<div class="typing-indicator"><span></span><span></span><span></span></div>';
+
+        div.appendChild(avatar);
+        div.appendChild(contentDiv);
+        chatArea.appendChild(div);
+        chatArea.scrollTop = chatArea.scrollHeight;
+
+        return contentDiv;
+    }
+
+    async function sendMessage() {
+        const text = messageInput.value.trim();
+        if (!text || isStreaming) return;
+
+        isStreaming = true;
+        sendBtn.disabled = true;
+        messageInput.value = '';
+        messageInput.style.height = 'auto';
+
+        addMessage('user', text);
+        const streamDiv = showTyping();
+
+        try {
+            const response = await fetch('/api/chat', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    message: text,
+                    history: conversationHistory.slice(-6)
+                })
+            });
+
+            if (response.status === 401) {
+                streamDiv.innerHTML = '<p>Session expired. Please refresh the page.</p>';
+                isStreaming = false;
+                sendBtn.disabled = false;
+                return;
+            }
+
+            const reader = response.body.getReader();
+            const decoder = new TextDecoder();
+            let fullText = '';
+            let started = false;
+
+            while (true) {
+                const { done, value } = await reader.read();
+                if (done) break;
+
+                const chunk = decoder.decode(value, { stream: true });
+                const lines = chunk.split('\n');
+
+                for (const line of lines) {
+                    if (line.startsWith('data: ')) {
+                        const data = line.slice(6);
+                        if (data === '[DONE]') continue;
+
+                        try {
+                            const parsed = JSON.parse(data);
+                            if (!started) {
+                                started = true;
+                                streamDiv.innerHTML = '';
+                            }
+                            fullText += parsed.text;
+                            streamDiv.innerHTML = formatContent(fullText);
+                            chatArea.scrollTop = chatArea.scrollHeight;
+                        } catch (e) {}
+                    }
+                }
+            }
+
+            // Store in conversation history
+            conversationHistory.push({ role: 'user', content: text });
+            conversationHistory.push({ role: 'assistant', content: fullText });
+
+        } catch (err) {
+            streamDiv.innerHTML = '<p>Connection error. Please try again.</p>';
+        }
+
+        isStreaming = false;
+        sendBtn.disabled = false;
+        messageInput.focus();
+    }
+    </script>
+</body>
+</html>

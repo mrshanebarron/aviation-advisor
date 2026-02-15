@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Aviation Advisor — Document Management</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <div class="admin-shell">
+        <header class="header" style="padding-left:0;padding-right:0;">
+            <div class="header-brand">
+                <div class="header-icon">&#9992;</div>
+                <h1>Aviation <span>Advisor</span></h1>
+            </div>
+            <nav class="header-nav">
+                <a href="/">Back to Chat</a>
+            </nav>
+        </header>
+
+        <div id="stats" class="stats-bar">
+            Loading...
+        </div>
+
+        <div class="admin-section">
+            <h2>Upload Documents</h2>
+            <div class="upload-zone" id="uploadZone" onclick="document.getElementById('fileInput').click()">
+                <div class="icon">&#128196;</div>
+                <div>Drop PDF, TXT, or MD files here — or click to browse</div>
+                <div style="font-size:12px;margin-top:4px;color:var(--text-muted)">Supports multiple files</div>
+                <input type="file" id="fileInput" multiple accept=".pdf,.txt,.md,.csv" onchange="uploadFiles(this.files)">
+            </div>
+            <div class="upload-progress" id="uploadProgress">
+                <div class="progress-bar">
+                    <div class="progress-bar-fill" id="progressFill"></div>
+                </div>
+                <div id="uploadStatus" style="font-size:13px;color:var(--text-muted)"></div>
+            </div>
+        </div>
+
+        <div class="admin-section">
+            <h2>Knowledge Base</h2>
+            <div class="doc-list" id="docList">
+                <div class="empty-state">Loading documents...</div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+    const uploadZone = document.getElementById('uploadZone');
+    const docList = document.getElementById('docList');
+    const stats = document.getElementById('stats');
+    const uploadProgress = document.getElementById('uploadProgress');
+    const progressFill = document.getElementById('progressFill');
+    const uploadStatus = document.getElementById('uploadStatus');
+
+    // Drag and drop
+    uploadZone.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        uploadZone.classList.add('dragover');
+    });
+    uploadZone.addEventListener('dragleave', () => {
+        uploadZone.classList.remove('dragover');
+    });
+    uploadZone.addEventListener('drop', (e) => {
+        e.preventDefault();
+        uploadZone.classList.remove('dragover');
+        uploadFiles(e.dataTransfer.files);
+    });
+
+    async function uploadFiles(files) {
+        if (!files.length) return;
+
+        uploadProgress.classList.add('active');
+        progressFill.style.width = '20%';
+        uploadStatus.textContent = `Uploading ${files.length} file(s)...`;
+
+        const formData = new FormData();
+        for (const file of files) {
+            formData.append('files', file);
+        }
+
+        try {
+            progressFill.style.width = '50%';
+            uploadStatus.textContent = 'Processing and indexing...';
+
+            const response = await fetch('/api/documents/upload', {
+                method: 'POST',
+                body: formData
+            });
+
+            if (response.status === 401) {
+                uploadStatus.textContent = 'Session expired. Please refresh.';
+                return;
+            }
+
+            const data = await response.json();
+            progressFill.style.width = '100%';
+
+            const indexed = data.results.filter(r => r.status === 'indexed').length;
+            const failed = data.results.filter(r => r.status !== 'indexed').length;
+            let msg = `${indexed} document(s) indexed (${data.total_chunks} total chunks)`;
+            if (failed) msg += `, ${failed} failed`;
+            uploadStatus.textContent = msg;
+
+            setTimeout(() => {
+                uploadProgress.classList.remove('active');
+                progressFill.style.width = '0%';
+            }, 3000);
+
+            loadDocuments();
+
+        } catch (err) {
+            uploadStatus.textContent = 'Upload failed: ' + err.message;
+            progressFill.style.width = '0%';
+        }
+
+        // Reset file input
+        document.getElementById('fileInput').value = '';
+    }
+
+    async function loadDocuments() {
+        try {
+            const response = await fetch('/api/documents');
+            if (response.status === 401) {
+                docList.innerHTML = '<div class="empty-state">Session expired. Please refresh.</div>';
+                return;
+            }
+
+            const data = await response.json();
+
+            stats.innerHTML = `
+                <span>Documents: <strong>${data.documents.length}</strong></span>
+                <span>Total Chunks: <strong>${data.total_chunks}</strong></span>
+            `;
+
+            if (!data.documents.length) {
+                docList.innerHTML = '<div class="empty-state">No documents yet. Upload files to build the knowledge base.</div>';
+                return;
+            }
+
+            docList.innerHTML = data.documents.map(doc => `
+                <div class="doc-item">
+                    <div class="doc-info">
+                        <div class="doc-icon">&#128196;</div>
+                        <div>
+                            <div class="doc-name">${doc.filename}</div>
+                            <div class="doc-chunks">${doc.chunks} chunks</div>
+                        </div>
+                    </div>
+                    <button class="doc-delete" onclick="deleteDoc('${doc.filename}')">Remove</button>
+                </div>
+            `).join('');
+
+        } catch (err) {
+            docList.innerHTML = '<div class="empty-state">Error loading documents.</div>';
+        }
+    }
+
+    async function deleteDoc(filename) {
+        if (!confirm(`Remove "${filename}" from the knowledge base?`)) return;
+
+        try {
+            await fetch(`/api/documents/${encodeURIComponent(filename)}`, { method: 'DELETE' });
+            loadDocuments();
+        } catch (err) {
+            alert('Delete failed: ' + err.message);
+        }
+    }
+
+    // Load on page ready
+    loadDocuments();
+    </script>
+</body>
+</html>
